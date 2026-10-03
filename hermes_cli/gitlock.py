@@ -631,7 +631,7 @@ def consolidate_lazy_fetch_packs(repo_root: Path, *,
     and leaves its ``pack-objects`` child running. ``on_fold_start(pack_count)`` fires just before
     a fold gc will actually do (pack count past the limit), so the caller can say why the update
     went quiet. Best-effort like every helper here: never raises, returns 0 for a non-partial
-    checkout or when nothing folded, and ``None`` when the fold hit its time limit.
+    checkout or when nothing folded, and ``None`` when the fold failed or could not finish.
     """
     try:
         if _partial_clone_filter(repo_root, creationflags=windows_hide_flags()) is None:
@@ -641,13 +641,18 @@ def consolidate_lazy_fetch_packs(repo_root: Path, *,
         limit = _gc_auto_pack_limit(repo_root)
         if on_fold_start is not None and 0 < limit < before:
             on_fold_start(before)
-        if bounded_probe_run(
+        result = bounded_probe_run(
             ["git", "-c", "gc.autoDetach=false", "-c", "gc.writeCommitGraph=false", "gc", "--auto"],
             timeout=LAZY_FETCH_GC_TIMEOUT_SECONDS, cwd=str(repo_root),
             env={**noninteractive_git_env(), **NO_LAZY_FETCH_ENV},
-        ) is None:
-            logger.warning("Folding %d lazy-fetch pack(s) in %s timed out after %ds",
+        )
+        if result is None:
+            logger.warning("Folding %d lazy-fetch pack(s) in %s could not complete within %ds",
                            before, repo_root, LAZY_FETCH_GC_TIMEOUT_SECONDS)
+            return None
+        if result.returncode != 0:
+            logger.warning("Folding %d lazy-fetch pack(s) in %s failed with exit code %d",
+                           before, repo_root, result.returncode)
             return None
         folded = before - len(list(_pack_dir(repo_root).glob("pack-*.pack")))
         if folded > 0:
@@ -655,4 +660,4 @@ def consolidate_lazy_fetch_packs(repo_root: Path, *,
         return max(folded, 0)
     except Exception:
         logger.debug("lazy-fetch pack consolidation failed for %s", repo_root, exc_info=True)
-        return 0
+        return None

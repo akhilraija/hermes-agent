@@ -50,14 +50,14 @@ def clear_git_debris(root: Path) -> None:
 
 
 def fold_lazy_fetch_packs(root: Path) -> None:
-    """Fold a partial clone's lazy-fetch packs (#129712), announcing a slow fold and a timed-out one."""
-    from hermes_cli.gitlock import LAZY_FETCH_GC_TIMEOUT_SECONDS, consolidate_lazy_fetch_packs
+    """Fold a partial clone's lazy-fetch packs (#129712), announcing a slow fold and any failure."""
+    from hermes_cli.gitlock import consolidate_lazy_fetch_packs
 
     folded = consolidate_lazy_fetch_packs(root, on_fold_start=lambda count: print(
         f"  Folding {count} lazy-fetch packs into one (one-time; can take several minutes)...", flush=True))
     if folded is None:
-        print(f"  ⚠ Folding lazy-fetch packs did not finish within {LAZY_FETCH_GC_TIMEOUT_SECONDS // 60} min."
-              " With Hermes closed, run:")
+        print("  Folding lazy-fetch packs could not complete (Git failed to run, exited with an error,"
+              " or reached its time limit). With Hermes closed, run:")
         print(f'      git -C "{root}" -c gc.writeCommitGraph=false gc --auto')
     elif folded:
         print(f"  (folded {folded} lazy-fetch pack(s) into one)")

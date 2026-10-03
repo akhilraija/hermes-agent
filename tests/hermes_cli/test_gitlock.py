@@ -355,3 +355,26 @@ def test_update_debris_cleanup_folds_and_reports_a_fold_that_runs_out_of_time(
 
     clear_git_debris(partial_clone)
     assert len(_packs(partial_clone)) < before
+
+
+def test_failed_pack_fold_reports_failure_and_can_recover(
+        partial_clone: Path, capfd: pytest.CaptureFixture[str]) -> None:
+    from hermes_cli.update_cmd_check import fold_lazy_fetch_packs
+
+    before = set(_packs(partial_clone))
+    _run_git("config", "pack.threads", "invalid", cwd=partial_clone)
+    fold_lazy_fetch_packs(partial_clone)
+
+    output = capfd.readouterr().out
+    assert set(_packs(partial_clone)) == before
+    assert "could not complete" in output
+    assert "gc.writeCommitGraph=false gc --auto" in output
+    assert "(folded " not in output
+
+    _run_git("config", "--unset", "pack.threads", cwd=partial_clone)
+    fold_lazy_fetch_packs(partial_clone)
+    assert len(_packs(partial_clone)) < len(before)
+    assert "(folded " in capfd.readouterr().out
+
+    fold_lazy_fetch_packs(partial_clone)
+    assert capfd.readouterr().out == ""
