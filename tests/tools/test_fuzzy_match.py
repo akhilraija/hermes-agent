@@ -608,6 +608,31 @@ class TestEscapeNormalizedNewString:
         # \n preserved as literal backslash-n
         assert "\\n" in new
 
+    def test_exact_match_keeps_escape_inside_tab_indented_go_rune(self):
+        content = "func f(r rune) bool {\n\tcase ' ':\n\t\treturn true\n}\n"
+        old_string = "\tcase ' ':"
+        new_string = "\tcase ' ', '\\t':"
+        result, count, strategy, error = fuzzy_find_and_replace(content, old_string, new_string)
+        assert (count, strategy, error) == (1, "exact", None)
+        assert "\tcase ' ', '\\t':" in result
+        assert "\tcase ' ', '\t':" not in result
+
+    def test_exact_match_keeps_escape_inside_tab_indented_string(self):
+        content = "\treturn before\n"
+        result, count, strategy, error = fuzzy_find_and_replace(
+            content, "\treturn before", "\treturn \"\\t\""
+        )
+        assert (count, strategy, error) == (1, "exact", None)
+        assert result == "\treturn \"\\t\"\n"
+
+    def test_exact_match_preserves_literal_carriage_return_in_source(self):
+        content = "\r\nvalue = before\r\n"
+        result, count, strategy, error = fuzzy_find_and_replace(
+            content, "\r\nvalue = before", "\r\nvalue = \"\\r\""
+        )
+        assert (count, strategy, error) == (1, "exact", None)
+        assert result == "\r\nvalue = \"\\r\"\r\n"
+
     def test_exact_match_preserves_literal_backslash_t_in_string_literal(self):
         """If the matched region of the file does NOT contain a real tab,
         new_string's literal ``\\t`` is preserved — the file genuinely uses

@@ -388,7 +388,13 @@ def fuzzy_find_and_replace(content: str, old_string: str, new_string: str,
             if drift_err:
                 return content, 0, None, drift_err
 
-        effective_new = _maybe_unescape_new_string(new_string, content, matches)
+        # An exact match with real controls already present in the replacement
+        # provides no evidence that a separate \\t or \\r is serialized indentation.
+        # Preserve those escapes (often source literals) rather than rewriting them
+        # merely because the matched region is tab-indented.
+        effective_new = _maybe_unescape_new_string(
+            new_string, content, matches, preserve_present=strategy_name == "exact"
+        )
         new_content = _apply_replacements(
             content, matches, effective_new,
             old_string=old_string if strategy_name != "exact" else None,
@@ -502,15 +508,17 @@ def _detect_backslash_doubling(matched_regions: str, old_string: str,
         "as they appear in the file.")
 
 
-def _maybe_unescape_new_string(new_string: str, content: str, matches: list[Span]) -> str:
-    """Convert literal ``\\t``/``\\r`` in new_string to control chars, per sequence, only
-    when the matched region already contains the real control char (so ``sep = "\\t"`` files
-    are left alone). ``\\n`` is excluded: rewriting it would mangle source escape literals."""
+def _maybe_unescape_new_string(new_string: str, content: str, matches: list[Span], *,
+                               preserve_present: bool = False) -> str:
+    """Convert serialized ``\\t``/``\\r`` only when the matched region has the
+    corresponding control character. On exact matches, a control character already
+    present in the replacement makes the same escape ambiguous: preserve it as a
+    literal (e.g. a rune in tab-indented source). ``\\n`` is never converted."""
     if "\\t" not in new_string and "\\r" not in new_string:
         return new_string
     matched_regions = _matched_regions(content, matches)
     for literal, control in (("\\t", "\t"), ("\\r", "\r")):
-        if literal in new_string and control in matched_regions:
+        if literal in new_string and control in matched_regions and not (preserve_present and control in new_string):
             new_string = new_string.replace(literal, control)
     return new_string
 
