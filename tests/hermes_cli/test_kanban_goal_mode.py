@@ -122,11 +122,68 @@ def test_loop_stops_when_worker_already_completed(monkeypatch):
         goal_text="do the thing",
         run_turn=lambda p: turns.append(p) or "x",
         task_status_fn=lambda: "done",
-        block_fn=lambda r: pytest.fail("should not block"),
+        block_fn=lambda r, kind=None: pytest.fail("should not block"),
         first_response="done already",
     )
     assert res["outcome"] == "completed_by_worker"
     assert turns == []  # no extra turns
+
+
+def test_loop_budget_exhaustion_blocks_with_needs_input_kind(monkeypatch):
+    # #157561: goal-loop blocks must carry a typed kind so supervisors can route
+    # them and the same-kind loop breaker can count recurrences.
+    _patch_judge(monkeypatch, ["continue"])
+    blocks = []
+
+    res = goals.run_kanban_goal_loop(
+        task_id="t1",
+        goal_text="do the thing",
+        run_turn=lambda p: "still working",
+        task_status_fn=lambda: "running",
+        block_fn=lambda r, kind: blocks.append((r, kind)),
+        max_turns=1,
+        first_response="turn one",
+    )
+    assert res["outcome"] == "blocked_budget"
+    assert res["reason"] == "turn budget exhausted"
+    assert len(blocks) == 1
+    assert blocks[0][1] == "needs_input"
+
+
+def test_loop_unachievable_blocks_with_needs_input_kind(monkeypatch):
+    _patch_judge(monkeypatch, ["blocked"])
+    blocks = []
+
+    res = goals.run_kanban_goal_loop(
+        task_id="t1",
+        goal_text="do the thing",
+        run_turn=lambda p: pytest.fail("must not run another turn"),
+        task_status_fn=lambda: "running",
+        block_fn=lambda r, kind: blocks.append((r, kind)),
+        first_response="turn one",
+    )
+    assert res["outcome"] == "blocked_unachievable"
+    assert len(blocks) == 1
+    assert blocks[0][1] == "needs_input"
+
+
+def test_loop_done_never_finalized_blocks_with_needs_input_kind(monkeypatch):
+    _patch_judge(monkeypatch, ["done", "done"])
+    blocks = []
+
+    res = goals.run_kanban_goal_loop(
+        task_id="t1",
+        goal_text="do the thing",
+        run_turn=lambda p: "looks complete",
+        task_status_fn=lambda: "running",
+        block_fn=lambda r, kind: blocks.append((r, kind)),
+        max_turns=5,
+        first_response="turn one",
+    )
+    assert res["outcome"] == "blocked_budget"
+    assert res["reason"] == "judged done, never finalized"
+    assert len(blocks) == 1
+    assert blocks[0][1] == "needs_input"
 
 
 def test_loop_stops_on_judge_transport_failure(monkeypatch):
@@ -144,7 +201,7 @@ def test_loop_stops_on_judge_transport_failure(monkeypatch):
         goal_text="do the thing",
         run_turn=lambda p: turns.append(p) or "x",
         task_status_fn=lambda: "running",
-        block_fn=lambda r: pytest.fail("should not block"),
+        block_fn=lambda r, kind=None: pytest.fail("should not block"),
         first_response="first attempt",
     )
     assert res["outcome"] == "stopped"
@@ -166,7 +223,7 @@ def test_loop_stops_on_worker_failed_flag(monkeypatch):
             "failure_reason": "context_window_exceeded",
         },
         task_status_fn=lambda: "running",
-        block_fn=lambda r: pytest.fail("should not block"),
+        block_fn=lambda r, kind=None: pytest.fail("should not block"),
         first_response="first attempt",
     )
     assert res["outcome"] == "stopped"
@@ -186,7 +243,7 @@ def test_loop_stops_on_worker_failed_flag_default_reason(monkeypatch):
             "failed": True,
         },
         task_status_fn=lambda: "running",
-        block_fn=lambda r: pytest.fail("should not block"),
+        block_fn=lambda r, kind=None: pytest.fail("should not block"),
         first_response="first attempt",
     )
     assert res["outcome"] == "stopped"
