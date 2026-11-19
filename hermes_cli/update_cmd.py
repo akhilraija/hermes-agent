@@ -740,6 +740,36 @@ def _resume_paused_gateways_at_exit(token: dict | None, request: dict | None) ->
                      f"Windows gateway recovery failed: {exc}")
 
 
+def _report_gateways_left_stopped(token: dict | None, request: dict) -> None:
+    """The run's last word when a committed update left its paused gateways stopped (#145470).
+
+    C3 keeps the exit 0 — the code is committed — and the tree gate's deferral warning above is
+    mid-log. A gateway-only cron/messaging host may never run another ``hermes`` command to sync
+    the dependencies and resume the set, so name the outage once more at the end of the run with
+    its recovery command, and notify the operator's terminal when one is attached. Never raises:
+    a reporting failure must not turn a committed update into an error.
+    """
+    if not token or not token.get("resume_deferred"):
+        return
+    names = [u.get("unit") or u.get("label") for u in token.get("posix_units") or []]
+    names += sorted(token.get("profiles") or {})
+    names += [f"pid {u['pid']}" for u in token.get("unmapped") or [] if u.get("argv") and u.get("pid")]
+    names = [name for name in names if name]
+    print()
+    print(f"⚠ Gateway(s) left stopped after the update: {token['resume_deferred']}.")
+    if names:
+        print(f"  Still stopped: {', '.join(names)}")
+    print("  The code is committed (exit 0), but messaging and cron stay down until the gateways resume.")
+    print("  Recover: run `hermes update` again, then confirm with `hermes gateway status`.")
+    if not request.get("gateway_mode") and sys.stdout.isatty():
+        with suppress(Exception):
+            from hermes_cli.terminal_notify import notification_sequence, write_tty
+
+            write_tty(notification_sequence(
+                "update committed but gateway(s) still stopped — run `hermes update` to recover",
+                prompt=False))
+
+
 def _complete_source_update(request: dict | None) -> None:
     # Never "Update complete!" while this run's local patches sit unrestored in the stash (#122557).
     unrestored = _unrestored_autostash_notice()
@@ -804,6 +834,9 @@ def _complete_source_update(request: dict | None) -> None:
         _settle_windows_resume(request)
     if result["exit_code"]:
         raise SystemExit(result["exit_code"])
+    # The resume above may have been deferred by the tree gate (dependencies owed, torn checkout):
+    # the paused set stays stopped while the run exits 0. Say so once more as the final summary.
+    _report_gateways_left_stopped(token, request)
     if lost:
         return  # a retired channel is adopted after a verified completion only; the next update adopts it
     try:
