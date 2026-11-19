@@ -27,7 +27,24 @@ def test_browser_env_appends_loopback_to_operator_no_proxy(stub_sanitized_env):
     stub_sanitized_env["NO_PROXY"] = "git.internal, 10.0.0.0/8"
     env = bs.build_browser_env()
     assert env["NO_PROXY"] == "git.internal,10.0.0.0/8,127.0.0.1,localhost,::1"
-    assert env["no_proxy"] == "127.0.0.1,localhost,::1"
+    # urllib/requests read lowercase ``no_proxy`` first, so it must carry the operator entries
+    # too; a loopback-only lowercase value would shadow the uppercase NO_PROXY (#156568).
+    assert env["no_proxy"] == "git.internal,10.0.0.0/8,127.0.0.1,localhost,::1"
+
+
+def test_uppercase_only_no_proxy_keeps_operator_entries_in_lowercase():
+    # #156568: an operator who sets only NO_PROXY must not lose those hosts from the lowercase
+    # no_proxy urllib reads first — a loopback-only lowercase value proxies the CDP dial.
+    env = add_loopback_no_proxy({"NO_PROXY": "browser,localhost,127.0.0.1"})
+    assert env["no_proxy"] == "browser,localhost,127.0.0.1,::1"
+    assert env["NO_PROXY"] == "browser,localhost,127.0.0.1,::1"
+    assert "browser" in env["no_proxy"].split(",")
+
+
+def test_lowercase_only_no_proxy_keeps_operator_entries_in_uppercase():
+    env = add_loopback_no_proxy({"no_proxy": "git.internal"})
+    assert env["NO_PROXY"] == "git.internal,127.0.0.1,localhost,::1"
+    assert env["no_proxy"] == "git.internal,127.0.0.1,localhost,::1"
 
 
 def test_operator_no_proxy_wildcard_is_left_alone():

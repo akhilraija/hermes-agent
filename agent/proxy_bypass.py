@@ -96,11 +96,18 @@ def add_loopback_no_proxy(env: dict) -> dict:
     already covers loopback and would stop being the wildcard once anything is appended to it."""
     if any("*" in no_proxy_entries(env.get(key) or "") for key in ("NO_PROXY", "no_proxy")):
         return env  # both casings: requests/urllib read ``no_proxy`` first, so a loopback-only one would win
+    # Operator entries may live in only one casing. urllib/requests prefer lowercase ``no_proxy``,
+    # so seeding each casing from its own value alone lets a loopback-only ``no_proxy`` shadow an
+    # uppercase-only ``NO_PROXY`` and drop every operator host from the bypass list (#156568).
+    # Start both casings from the union of the operator entries so neither loses them.
+    base = no_proxy_entries(env.get("NO_PROXY") or "")
+    for entry in no_proxy_entries(env.get("no_proxy") or ""):
+        if entry not in base:
+            base.append(entry)
     for key in ("NO_PROXY", "no_proxy"):
-        entries = no_proxy_entries(env.get(key) or "")
+        entries = list(base)
         missing = [host for host in LOOPBACK_HOSTS if host not in entries]
-        if missing:
-            env[key] = ",".join(entries + missing)
+        env[key] = ",".join(entries + missing)
     return env
 
 
