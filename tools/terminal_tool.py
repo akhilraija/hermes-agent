@@ -1772,9 +1772,37 @@ TERMINAL_SCHEMA = {
 }
 
 
+def _coerce_string_bool(value):
+    """Normalize stringified booleans ("True"/"False", any case) to bool.
+
+    Some models emit Python-style boolean literals, which arrive as strings
+    instead of JSON true/false. Non-boolean values pass through unchanged so
+    existing validation still teaches the correct call shape.
+    """
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered == "true":
+            return True
+        if lowered == "false":
+            return False
+    return value
+
+
 def _handle_terminal(args, **kw):
     from agent.terminal_approval_batch import validate_prepared_terminal
     validate_prepared_terminal(args)
+    # Models sometimes send Python-style "True"/"False" strings for boolean
+    # parameters. Normalize them before the checks below: the strict notify
+    # validation would reject the call, and truthiness checks would treat
+    # "False" as enabled — both send agents into retry loops (#157759).
+    # Rebind a copy AFTER the consent guard so the prepared-approval args
+    # comparison above still sees the original dict.
+    coerced: dict = {
+        key: _coerce_string_bool(args[key])
+        for key in ("background", "pty", "notify", "persist_on_release", "notify_on_complete")
+        if key in args
+    }
+    args = {**args, **coerced}
     # Models sometimes send execute_code's ``code`` here; name the stray
     # argument and the right tool instead of failing on command=None.
     if "command" not in args and "code" in args:
