@@ -122,7 +122,9 @@ def _is_gateway_surface() -> bool:
     if env_var_enabled("HERMES_GATEWAY_SESSION"):
         return True
     from gateway.session_context import get_session_env
-    return bool(get_session_env("HERMES_SESSION_PLATFORM"))
+    platform = get_session_env("HERMES_SESSION_PLATFORM")
+    # Local clients route secure entry through their callback, not a messaging chat.
+    return bool(platform) and platform not in {"desktop", "tui", "cli", "acp"}
 
 
 def _is_env_var_persisted(var_name: str, env_snapshot: dict[str, str]) -> bool:

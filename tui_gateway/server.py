@@ -926,7 +926,10 @@ def _set_session_context(session_key: str, cwd: str | None = None, *, ui_session
             # App-global backends multiplex profiles: prefer the live session's own home.
             profile = profile_name_for_home(sess.get("profile_home")) or profile
             session_id = getattr(sess.get("agent"), "session_id", None) or session_key
+        # A caller's source may be a custom label; it must not hide the client surface.
+        platform = source if source in {"desktop", "tui", "cli", "acp"} else _resolve_session_platform()
         return set_session_vars(
+            platform=platform, chat_type="dm",
             session_key=session_key, session_id=session_id, source=source,
             profile=profile, cwd=resolved, ui_session_id=ui_session_id, cron_session="")
     return []
